@@ -372,12 +372,9 @@ fn main()
     {
         network.feed_forward(&inputs[i]);
         println!("{:?}", network.get_output_data().to_vec());
-        
     }
     
     
-    
-    return;
     let args = std::env::args().collect::<Vec<_>>();
     if args.len() < 4
     {
