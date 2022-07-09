@@ -1,10 +1,6 @@
 use image::Pixel;
 use image::DynamicImage::*;
 
-use rand::Rng;
-
-use core::marker::PhantomData;
-
 mod neural;
 
 fn px(mut x : i32, mut y : i32, image : & image::Rgba32FImage) -> image::Rgba<f32>
@@ -166,7 +162,7 @@ fn set_up_inputs<const N : usize, const M : usize>
 {
     let (color, ground_truth, normal, octaves) = set_up_images(color_fname, ground_truth_fname);
     
-    let mut rng = rand::thread_rng();
+    //let rng = rand::thread_rng();
     /*
     for i in 0..50000
     {
@@ -189,7 +185,7 @@ fn set_up_inputs<const N : usize, const M : usize>
             let mut z = 0;
             let mut push_value = |x|
             {
-                inputs[z] = x - 0.5;
+                inputs[z] = x;
                 z += 1;
             };
             
@@ -197,9 +193,9 @@ fn set_up_inputs<const N : usize, const M : usize>
             
             let mut push_pixel = |x : image::Rgba<f32>|
             {
-                inputs[z+0] = x[0] - 0.5;
-                inputs[z+1] = x[1] - 0.5;
-                inputs[z+2] = x[2] - 0.5;
+                inputs[z+0] = x[0];
+                inputs[z+1] = x[1];
+                inputs[z+2] = x[2];
                 z += 3;
             };
             
@@ -212,9 +208,9 @@ fn set_up_inputs<const N : usize, const M : usize>
             
             let output_px = px(x, y, &ground_truth);
             let mut outputs = [0.0f32; M];
-            outputs[0] = output_px[0] - 0.5;
-            outputs[1] = output_px[1] - 0.5;
-            outputs[2] = output_px[2] - 0.5;
+            outputs[0] = output_px[0];
+            outputs[1] = output_px[1];
+            outputs[2] = output_px[2];
             
             input_samples.push(inputs);
             output_samples.push(outputs);
@@ -241,24 +237,27 @@ fn main()
         set_up_inputs(pair[0], pair[1], &mut input_samples, &mut output_samples);
     }
     
-    println!("beginning training");
-    //network.fully_train(&mut input_samples, &mut output_samples, 50000, 0.05);
+    let learning_rate = 0.05;
     
-    let (color, _, normal, octaves) = set_up_images(&args[1], "");
+    println!("beginning training");
+    network.fully_train(&mut input_samples, &mut output_samples, 5000000, learning_rate);
+    
+    let (color, _, _, octaves) = set_up_images(&args[1], "");
     
     for _i in 0..2
     {
         let mut normal = image::DynamicImage::new_rgb32f(color.width(), color.height()).to_rgba32f();
         
+        let mut inputs = [0.0f32; 28];
+        let mut outputs = [1.0f32; 4];
         for y in 0..normal.height() as i32
         {
             for x in 0..normal.width() as i32
             {
-                let mut inputs = [0.0f32; 28];
                 let mut z = 0;
                 let mut push_value = |x|
                 {
-                    inputs[z] = x - 0.5;
+                    inputs[z] = x;
                     z += 1;
                 };
                 
@@ -266,9 +265,9 @@ fn main()
                 
                 let mut push_pixel = |x : image::Rgba<f32>|
                 {
-                    inputs[z+0] = x[0] - 0.5;
-                    inputs[z+1] = x[1] - 0.5;
-                    inputs[z+2] = x[2] - 0.5;
+                    inputs[z+0] = x[0];
+                    inputs[z+1] = x[1];
+                    inputs[z+2] = x[2];
                     z += 3;
                 };
                 
@@ -279,11 +278,10 @@ fn main()
                 }
                 push_pixel(px(x, y, &normal));
                 
-                let mut outputs = [1.0f32; 4];
                 let outputty = network.feed_forward(&inputs);
-                outputs[0] = outputty[0] + 0.5;
-                outputs[1] = outputty[1] + 0.5;
-                outputs[2] = outputty[2] + 0.5;
+                outputs[0] = outputty[0];
+                outputs[1] = outputty[1];
+                outputs[2] = outputty[2];
                 
                 normal.put_pixel(x as u32, y as u32, image::Rgba::<f32>::from(outputs));
             }
@@ -291,8 +289,25 @@ fn main()
         println!("{:?}", network);
         let normal = ImageRgba8(ImageRgba32F(normal).to_rgba8());
         normal.save(format!("{}_{}", _i, &args[2])).unwrap();
-        network.fully_train(&mut input_samples, &mut output_samples, 1, 0.5);
+        network.fully_train(&mut input_samples, &mut output_samples, 1, learning_rate);
     }
+    
+    
+    let mut out_sum = [0f32; 3];
+    let mut out_count = [0f32; 3];
+    for set in &output_samples
+    {
+        for (i, x) in set.iter().enumerate()
+        {
+            out_sum[i] += x;
+            out_count[i] += 1.0;
+        }
+    }
+    for i in 0..out_sum.len()
+    {
+        out_sum[i] /= out_count[i];
+    }
+    println!("average output: {:?}", out_sum);
 }
 
 /*
