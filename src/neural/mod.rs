@@ -1,14 +1,12 @@
-mod neural;
-
 use rand::Rng;
 use core::marker::PhantomData;
 
-pub(crate) trait Activation : Default {
+pub(crate) trait Activation : Default + core::fmt::Debug {
     fn activation(x : f32) -> f32;
     fn derivative(x : f32) -> f32;
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct Sigmoid {
 }
 impl Activation for Sigmoid {
@@ -23,7 +21,21 @@ impl Activation for Sigmoid {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
+pub(crate) struct ReLU {
+}
+impl Activation for ReLU {
+    fn activation(mut x : f32) -> f32
+    {
+        x.max(x*0.01)
+    }
+    fn derivative(x : f32) -> f32
+    {
+        if x >= 0.0 { 1.0 } else { 0.01 }
+    }
+}
+
+#[derive(Default, Debug)]
 pub(crate) struct Linear {
 }
 impl Activation for Linear {
@@ -37,7 +49,7 @@ impl Activation for Linear {
     }
 }
 
-pub(crate) trait NeuralLayer {
+pub(crate) trait NeuralLayer : core::fmt::Debug {
     fn new(input_count : usize, output_count : usize) -> Self where Self : Sized;
     fn randomize(&mut self);
     fn get_output_data_mut(&mut self) -> &mut Vec<f32>;
@@ -48,7 +60,7 @@ pub(crate) trait NeuralLayer {
     fn feed_backward(&mut self, input_data : &[f32], output_error : &[f32], learn_rate : f32);
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct DummyLayer {
     output_count : usize,
     output_data : Vec<f32>,
@@ -88,7 +100,7 @@ impl NeuralLayer for DummyLayer {
 }
 
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(crate) struct FullyConnected<T> where T : Activation  {
     input_count : usize,
     output_count : usize,
@@ -119,7 +131,7 @@ impl<T : Activation> NeuralLayer for FullyConnected<T> {
         {
             for x in 0..w
             {
-                self.matrix[y*w + x] = rng.gen();
+                self.matrix[y*w + x] = (rng.gen::<f32>() - 0.5f32)*0.2;
             }
         }
     }
@@ -167,6 +179,8 @@ impl<T : Activation> NeuralLayer for FullyConnected<T> {
         assert!(input_data.len() >= self.input_count+1);
         assert!(output_error.len() >= self.output_count, "{} less than {}", output_error.len(), self.output_count);
         
+        let normalize = (self.input_count as f32);
+        
         let h = self.output_count;
         let w = self.input_count+1;
         for x in 0..w
@@ -184,7 +198,7 @@ impl<T : Activation> NeuralLayer for FullyConnected<T> {
                 // input_data = delta of weighted input / delta of weight = input
                 // and via chain rule dc/do * do/dz * dz/dw = dc/dw:
                 // delta_weight = delta of cost / delta of weight
-                let delta_weight = delta_cost * delta_output * input_data[x];
+                let delta_weight = delta_cost * delta_output * input_data[x] / normalize;
                 self.input_error[x] += delta_weight * self.matrix[y*w + x];
                 self.matrix[y*w + x] -= delta_weight * learn_rate;
             }
@@ -192,7 +206,29 @@ impl<T : Activation> NeuralLayer for FullyConnected<T> {
     }
 }
 
-#[derive(Default)]
+pub fn multishuffle
+<A: std::ops::Index<std::ops::RangeFull, Output = [f32]>,
+ B: std::ops::Index<std::ops::RangeFull, Output = [f32]>>
+    (a : &mut [A], b : &mut [B])
+{
+    let mut rng = rand::thread_rng();
+    
+    assert!(a[..].len() == b[..].len());
+    let len = a[..].len();
+    
+    for i in 0..len-1
+    {
+        let next = rng.gen_range(i+1..len);
+        
+        let (a1, a2) = a.split_at_mut(next);
+        std::mem::swap(&mut a1[i], &mut a2[0]);
+        
+        let (b1, b2) = b.split_at_mut(next);
+        std::mem::swap(&mut b1[i], &mut b2[0]);
+    }
+}
+
+#[derive(Default, Debug)]
 pub(crate) struct Network {
     input_count : usize,
     output_count : usize,
@@ -203,7 +239,7 @@ pub(crate) struct Network {
 }
 
 impl Network {
-    fn new(input_count : usize, output_count : usize) -> Self
+    pub(crate) fn new(input_count : usize, output_count : usize) -> Self
     {
         Self {
             input_count,
@@ -211,21 +247,21 @@ impl Network {
             layers : vec!(Box::new(DummyLayer::new(0, input_count))),
             //inputs : vec!(0.0; input_count),
             //outputs : vec!(0.0; output_count),
-            output_error : vec!(0.0; input_count),
+            output_error : vec!(0.0; output_count),
         }
     }
-    fn add_layer<T : NeuralLayer + Sized + 'static>(&mut self, output_count : usize)
+    pub(crate) fn add_layer<T : NeuralLayer + Sized + 'static>(&mut self, output_count : usize)
     {
         let input_count = self.layers.last().unwrap().get_output_count();
         let mut layer = Box::new(T::new(input_count, output_count));
         layer.randomize();
         self.layers.push(layer);
     }
-    fn add_output_layer<T : NeuralLayer + Sized + 'static>(&mut self)
+    pub(crate) fn add_output_layer<T : NeuralLayer + Sized + 'static>(&mut self)
     {
         self.add_layer::<T>(self.output_count)
     }
-    fn feed_forward(&mut self, inputs : &[f32]) -> &[f32]
+    pub(crate) fn feed_forward(&mut self, inputs : &[f32]) -> &[f32]
     {
         for (i, val) in inputs.iter().enumerate()
         {
@@ -240,7 +276,7 @@ impl Network {
         }
         self.layers.last().unwrap().get_output_data()
     }
-    fn feed_backward(&mut self, learn_rate : f32)
+    pub(crate) fn feed_backward(&mut self, learn_rate : f32)
     {
         for i in (1..self.layers.len()).rev()
         {
@@ -252,7 +288,7 @@ impl Network {
             next.feed_backward(prev.get_output_data(), output_error, learn_rate);
         }
     }
-    fn train_on(&mut self, inputs : &[f32], outputs : &[f32], learn_rate : f32)
+    pub(crate) fn train_on(&mut self, inputs : &[f32], outputs : &[f32], learn_rate : f32)
     {
         self.feed_forward(&inputs);
         for j in 0..self.output_count
@@ -261,21 +297,33 @@ impl Network {
         }
         self.feed_backward(learn_rate);
     }
-    fn fully_train
+    pub(crate) fn fully_train
     <A: std::ops::Index<std::ops::RangeFull, Output = [f32]>,
      B: std::ops::Index<std::ops::RangeFull, Output = [f32]>>
-        (&mut self, input_samples : &[A], output_samples : &[B], stages : usize, learn_rate : f32)
+        (&mut self, input_samples : &mut [A], output_samples : &mut [B], stages : usize, learn_rate : f32)
     {
         assert!(input_samples.len() == output_samples.len());
+        
+        let mut rng = rand::thread_rng();
+        
         let num_samples = input_samples.len();
-        let mut output_error = vec!(0.0; output_samples[0][..].len());
+        self.output_error = vec!(0.0; self.output_count);
         for i in 0..stages
         {
+            if (i) % num_samples == 0
+            {
+                multishuffle(input_samples, output_samples);
+            }
             let sample = i % num_samples;
+            //let sample = rng.gen_range(0..num_samples);
             self.train_on(&input_samples[sample][..], &output_samples[sample][..], learn_rate);
+            if i % 10000 == 0
+            {
+                println!("finished stage {}", i);
+            }
         }
     }
-    fn get_output_data(&self) -> &[f32]
+    pub(crate) fn get_output_data(&self) -> &[f32]
     {
         let data = self.layers.last().unwrap().get_output_data();
         let data_len = data.len();
@@ -285,9 +333,10 @@ impl Network {
 
 #[macro_export]
 macro_rules! build_network {
-    ($input_count:expr, $output_count:expr,
-     $($a:ident $b:ident $c:expr $(,)?)*
+    ($input_count:expr, $output_count:expr
+     $(, $a:ident $b:ident $c:expr)*
     ) => ( {
+        use $crate::neural::*;
         let mut network = Network::new($input_count, $output_count);
         $(network.add_layer::<$a<$b>>($c);)*
         network.add_output_layer::<FullyConnected<Linear>>();
